@@ -1,0 +1,51 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #F84565;
+  --color-primary-dull: #D63854;
+}
+
+*{
+  font-family: "Outfit", sans-serif;
+  scrollbar-width: thin;
+  scrollbar-color: #787777 #1e1e1e;
+}
+
+body{
+  color: white;
+  background-color: #09090B;
+}
+
+/* --- ADD THIS PART BELOW --- */
+
+/* Forces all movie posters to be identical in size */
+.poster-image {
+  width: 100%;
+  height: 320px;      /* Fixed height for all images */
+  object-fit: cover;  /* Crops the image to fill the area without stretching */
+  border-radius: 12px;
+  display: block;
+}
+
+/* Container to keep cards organized in a grid */
+.movie-grid-layout {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 24px;
+  padding: 20px;
+}
+
+/* Styling for the card text to keep it aligned */
+.movie-card-text {
+  margin-top: 12px;
+  text-align: center;
+}
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+}
+
+::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+}
