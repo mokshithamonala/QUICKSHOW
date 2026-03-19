@@ -59,3 +59,6 @@ export const syncUserFunctions = [
   syncUserDeletion,
   syncUserUpdation,
 ];
+
+// Export as 'functions' to match server.js import
+export const functions = syncUserFunctions;
