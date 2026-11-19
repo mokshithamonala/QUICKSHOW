@@ -13,15 +13,18 @@ const syncUserCreation = inngest.createFunction(
   { event: "clerk/user.created" },
   async ({ event }) => {
     const { id, first_name, last_name, email_addresses, image_url } = event.data;
+    const email = email_addresses?.[0]?.email_address || "";
+    const name = `${first_name || ""} ${last_name || ""}`.trim() || "QuickShow User";
 
     const userData = {
       _id: id,
-      email: email_addresses[0].email_address,
-      name: first_name + " " + last_name,
-      image: image_url,
+      email,
+      name,
+      image: image_url || "",
     };
 
-    await User.create(userData);
+    await User.findOneAndUpdate({ _id: id }, userData, { upsert: true, new: true });
+    return { success: true, userId: id };
   }
 );
 
@@ -32,6 +35,7 @@ const syncUserDeletion = inngest.createFunction(
   async ({ event }) => {
     const { id } = event.data;
     await User.findByIdAndDelete(id);
+    return { success: true, userId: id };
   }
 );
 
@@ -41,15 +45,18 @@ const syncUserUpdation = inngest.createFunction(
   { event: "clerk/user.updated" },
   async ({ event }) => {
     const { id, first_name, last_name, email_addresses, image_url } = event.data;
+    const email = email_addresses?.[0]?.email_address || "";
+    const name = `${first_name || ""} ${last_name || ""}`.trim() || "QuickShow User";
 
     const userData = {
       _id: id,
-      email: email_addresses[0].email_address,
-      name: first_name + " " + last_name,
-      image: image_url,
+      email,
+      name,
+      image: image_url || "",
     };
 
-    await User.findByIdAndUpdate(id, userData);
+    await User.findOneAndUpdate({ _id: id }, userData, { upsert: true, new: true });
+    return { success: true, userId: id };
   }
 );
 

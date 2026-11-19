@@ -1,0 +1,18 @@
+{
+  "name": "quickshow",
+  "version": "1.0.0",
+  "private": true,
+  "description": "QUICKSHOW full-stack movie discovery and cinema ticket booking platform",
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=client",
+    "dev": "npm run build --workspace=client && node server/server.js",
+    "start": "node server/server.js",
+    "dev:client": "npm run dev --workspace=client",
+    "dev:server": "PORT=5000 npm run server --workspace=server",
+    "lint": "node --check server/server.js && node --check server/configs/db.js && node --check server/inngest/index.js && node --check server/middleware/auth.js && node --check server/services/tmdbService.js && node --check server/services/dataStore.js && node --check server/routes/movieRoutes.js && node --check server/routes/showRoutes.js && node --check server/routes/bookingRoutes.js && node --check server/routes/userRoutes.js && node --check server/routes/adminRoutes.js"
+  }
+}

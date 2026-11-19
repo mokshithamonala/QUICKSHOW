@@ -55,17 +55,24 @@ const HeroSection = () => {
           It follows the journey of a hero as he seeks to solve a mysterious problem connected with history and culture. 
         </p>
 
-        {/* Action Button */}
-        <div className="flex items-center gap-6 mt-4">
+        {/* Action Buttons */}
+        <div className="flex flex-wrap items-center gap-4 mt-4">
           <button
-            onClick={() => navigate("/movies")}
-            className="group flex items-center gap-3 px-12 py-4 bg-red-600 text-white hover:bg-white hover:text-black transition-all duration-500 rounded-sm font-black uppercase tracking-widest text-xs shadow-[0_0_30px_rgba(220,38,38,0.5)]"
+            onClick={() => navigate("/mahesh-babu")}
+            className="group flex items-center gap-3 px-10 py-4 bg-red-600 text-white hover:bg-white hover:text-black transition-all duration-500 rounded-sm font-black uppercase tracking-widest text-xs shadow-[0_0_30px_rgba(220,38,38,0.5)] cursor-pointer"
           >
-            Explore the Saga
+            Explore BoB Multiverse
             <ArrowRight className="w-5 h-5 group-hover:translate-x-2 transition-transform" />
           </button>
 
-          <span className="hidden md:block text-[10px] text-gray-400 uppercase tracking-[0.4em] font-bold">
+          <button
+            onClick={() => navigate("/movies")}
+            className="flex items-center gap-2 px-8 py-4 bg-black/60 border border-white/25 text-white hover:border-red-500 hover:text-red-400 transition-all duration-300 rounded-sm font-bold uppercase tracking-widest text-xs cursor-pointer"
+          >
+            Browse All Movies
+          </button>
+
+          <span className="hidden lg:block text-[10px] text-gray-400 uppercase tracking-[0.4em] font-bold">
             Advanced Filmmaking Technology
           </span>
         </div>
