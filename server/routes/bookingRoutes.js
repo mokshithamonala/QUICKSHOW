@@ -188,6 +188,18 @@ router.post("/payments/verify", requireAuth, async (req, res, next) => {
     }
 
     const adapter = getPaymentAdapter();
+
+    // Strict isolation: never allow a simulated booking to be treated as a real Razorpay transaction (or vice versa)
+    if (
+      booking.payment?.provider &&
+      booking.payment.provider !== adapter.provider
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: `Payment provider mismatch: booking was initiated under "${booking.payment.provider}" and cannot be verified by "${adapter.provider}".`,
+      });
+    }
+
     const verification = await adapter.verifyPayment({
       bookingId: String(booking._id),
       amount: booking.totalAmount,

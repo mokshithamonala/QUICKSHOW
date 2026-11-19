@@ -22,16 +22,27 @@ const FallbackAuthContext = createContext({
   getToken: async () => null,
 });
 
-export const AuthProvider = ({ children }) => {
-  if (isClerkEnabled) {
-    return (
-      <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
-        {children}
-      </ClerkProvider>
-    );
+class ClerkErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
   }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(err) {
+    console.warn("ClerkProvider fallback activated:", err?.message || err);
+  }
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback;
+    }
+    return this.props.children;
+  }
+}
 
-  return (
+export const AuthProvider = ({ children }) => {
+  const fallbackTree = (
     <FallbackAuthContext.Provider
       value={{
         isLoaded: true,
@@ -43,6 +54,18 @@ export const AuthProvider = ({ children }) => {
       {children}
     </FallbackAuthContext.Provider>
   );
+
+  if (isClerkEnabled) {
+    return (
+      <ClerkErrorBoundary fallback={fallbackTree}>
+        <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
+          {children}
+        </ClerkProvider>
+      </ClerkErrorBoundary>
+    );
+  }
+
+  return fallbackTree;
 };
 
 export const useAuthUser = () => {

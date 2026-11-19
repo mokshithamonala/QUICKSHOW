@@ -6,29 +6,32 @@ const DEV_HMAC_SECRET =
 const signPayload = (orderId, bookingId, amount) =>
   crypto
     .createHmac("sha256", DEV_HMAC_SECRET)
-    .update(`${orderId}|${bookingId}|${amount}`)
+    .update(`SIMULATED|${orderId}|${bookingId}|${amount}`)
     .digest("hex");
 
 export const devSimulatedAdapter = {
-  provider: "dev_simulated",
-  mode: "DEVELOPMENT MODE",
+  provider: "simulated",
+  mode: "DEVELOPMENT MODE (SIMULATED)",
   isSimulated: true,
+  isRealTransaction: false,
 
   async createOrder({ bookingId, amount, currency = "INR", bookingCode }) {
-    const orderId = `dev_order_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+    // Distinct "sim_order_" prefix guarantees simulated orders are never confused with Razorpay "order_" IDs
+    const orderId = `sim_order_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
     const orderToken = signPayload(orderId, bookingId, amount);
 
     return {
-      provider: "dev_simulated",
-      mode: "DEVELOPMENT MODE",
+      provider: "simulated",
+      mode: "DEVELOPMENT MODE (SIMULATED)",
       isSimulated: true,
+      isRealTransaction: false,
       orderId,
       orderToken,
       amount,
       currency,
       bookingCode,
       disclaimer:
-        "DEVELOPMENT MODE: Simulated payment adapter active. No real money is charged.",
+        "DEVELOPMENT MODE: Simulated payment transaction only. Not a real Razorpay transaction and no real money is charged.",
     };
   },
 
@@ -40,9 +43,21 @@ export const devSimulatedAdapter = {
     outcome = "success",
     failureReason = "",
   }) {
-    if (!orderId || !orderToken) {
+    if (!orderId || !String(orderId).startsWith("sim_order_")) {
       return {
         verified: false,
+        isSimulated: true,
+        isRealTransaction: false,
+        status: "FAILED",
+        reason: "Invalid order prefix: simulated adapter only accepts sim_order_ IDs.",
+      };
+    }
+
+    if (!orderToken) {
+      return {
+        verified: false,
+        isSimulated: true,
+        isRealTransaction: false,
         status: "FAILED",
         reason: "Missing simulated order verification token.",
       };
@@ -58,6 +73,8 @@ export const devSimulatedAdapter = {
     ) {
       return {
         verified: false,
+        isSimulated: true,
+        isRealTransaction: false,
         status: "FAILED",
         reason: "Invalid simulated payment signature.",
       };
@@ -66,8 +83,10 @@ export const devSimulatedAdapter = {
     if (outcome === "failed" || outcome === "fail") {
       return {
         verified: false,
+        isSimulated: true,
+        isRealTransaction: false,
         status: "FAILED",
-        paymentId: `dev_pay_fail_${crypto.randomBytes(4).toString("hex")}`,
+        paymentId: `sim_pay_fail_${crypto.randomBytes(4).toString("hex")}`,
         signature: orderToken,
         reason:
           failureReason ||
@@ -77,8 +96,10 @@ export const devSimulatedAdapter = {
 
     return {
       verified: true,
+      isSimulated: true,
+      isRealTransaction: false,
       status: "PAID",
-      paymentId: `dev_pay_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`,
+      paymentId: `sim_pay_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`,
       signature: orderToken,
       verifiedAt: new Date(),
     };
@@ -86,10 +107,13 @@ export const devSimulatedAdapter = {
 
   verifyWebhook() {
     return {
-      verified: true,
-      provider: "dev_simulated",
-      mode: "DEVELOPMENT MODE",
-      message: "Development simulated webhook accepted (test mode only).",
+      verified: false,
+      isSimulated: true,
+      isRealTransaction: false,
+      provider: "simulated",
+      mode: "DEVELOPMENT MODE (SIMULATED)",
+      reason:
+        "Razorpay webhooks are disabled while PAYMENT_MODE=simulated is active. Simulated payments are never processed as real Razorpay webhooks.",
     };
   },
 };

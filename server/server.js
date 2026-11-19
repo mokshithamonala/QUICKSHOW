@@ -43,20 +43,7 @@ connectDB().finally(() => {
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
-// Clerk Auth Middleware (guarded so server still boots if keys are missing)
-if (clerkReady) {
-  app.use(clerkMiddleware());
-} else {
-  console.warn(
-    "⚠️  Clerk server keys not configured — protected routes require valid Clerk keys in .env."
-  );
-  app.use((req, _res, next) => {
-    req.auth = () => ({ userId: null });
-    next();
-  });
-}
-
-// Health & Status Endpoint (never exposes secrets)
+// Health & Status Endpoint (always returns 200 JSON, never triggers auth handshake)
 app.get("/api/health", (_req, res) => {
   const payment = getPaymentStatusInfo();
   res.json({
@@ -67,10 +54,27 @@ app.get("/api/health", (_req, res) => {
     storageMode: isDbConnected() ? "mongodb" : "dev_fallback",
     clerkConfigured: clerkReady,
     tmdbConfigured: isTmdbConfigured(),
-    paymentMode: payment.provider,
+    paymentMode: payment.paymentMode,
+    paymentProvider: payment.provider,
     paymentLabel: payment.mode,
+    isSimulatedPayment: payment.isSimulated,
+    razorpayConfigured: payment.razorpayConfigured,
   });
 });
+
+// Clerk Auth Middleware — scoped strictly to /api so HTML/static preview routes
+// never trigger Clerk 307 handshake redirects inside iframes or SPAs
+if (clerkReady) {
+  app.use("/api", clerkMiddleware());
+} else {
+  console.warn(
+    "⚠️  Clerk server keys not configured — protected routes require valid Clerk keys in .env."
+  );
+  app.use("/api", (req, _res, next) => {
+    req.auth = () => ({ userId: null });
+    next();
+  });
+}
 
 // Inngest Endpoint (all 3 Clerk user sync functions registered)
 app.use("/api/inngest", serve({ client: inngest, functions: syncUserFunctions }));

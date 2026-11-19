@@ -599,6 +599,12 @@ const SeatLayout = () => {
                   </span>
                 </div>
                 <div className="flex justify-between">
+                  <span className="text-gray-400">Payment Mode</span>
+                  <span className="text-amber-300 font-mono text-xs font-semibold">
+                    PAYMENT_MODE={paymentOrder.provider || "simulated"} (Not Razorpay)
+                  </span>
+                </div>
+                <div className="flex justify-between">
                   <span className="text-gray-400">Order ID</span>
                   <span className="text-gray-300 font-mono text-xs">
                     {paymentOrder.orderId}

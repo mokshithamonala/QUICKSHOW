@@ -689,9 +689,10 @@ export const lockSeatsAndCreateBooking = async ({
       lockId,
       lockExpiresAt,
       payment: {
-        provider: "dev_simulated",
-        mode: "DEVELOPMENT MODE",
+        provider: "simulated",
+        mode: "DEVELOPMENT MODE (SIMULATED)",
         isSimulated: true,
+        isRealTransaction: false,
         status: "CREATED",
       },
     });
@@ -776,9 +777,10 @@ export const lockSeatsAndCreateBooking = async ({
     lockId,
     lockExpiresAt,
     payment: {
-      provider: "dev_simulated",
-      mode: "DEVELOPMENT MODE",
+      provider: "simulated",
+      mode: "DEVELOPMENT MODE (SIMULATED)",
       isSimulated: true,
+      isRealTransaction: false,
       orderId: "",
       paymentId: "",
       signature: "",
@@ -802,10 +804,12 @@ export const getBookingById = async (bookingId) => {
 };
 
 export const updateBookingOrder = async (bookingId, paymentOrder) => {
+  const isSimulated = Boolean(paymentOrder.isSimulated);
   const update = {
     "payment.provider": paymentOrder.provider,
     "payment.mode": paymentOrder.mode,
-    "payment.isSimulated": Boolean(paymentOrder.isSimulated),
+    "payment.isSimulated": isSimulated,
+    "payment.isRealTransaction": !isSimulated,
     "payment.orderId": paymentOrder.orderId,
     "payment.status": "CREATED",
   };
@@ -819,7 +823,8 @@ export const updateBookingOrder = async (bookingId, paymentOrder) => {
     ...b.payment,
     provider: paymentOrder.provider,
     mode: paymentOrder.mode,
-    isSimulated: Boolean(paymentOrder.isSimulated),
+    isSimulated,
+    isRealTransaction: !isSimulated,
     orderId: paymentOrder.orderId,
     status: "CREATED",
   };

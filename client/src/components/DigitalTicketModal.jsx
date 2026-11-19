@@ -258,13 +258,13 @@ const DigitalTicketModal = ({ booking, onClose }) => {
               <div>
                 Mode:{" "}
                 <span className="text-white font-medium">
-                  {booking.payment?.mode || "DEVELOPMENT MODE"}
+                  {booking.payment?.mode || "DEVELOPMENT MODE (SIMULATED)"}
                 </span>
               </div>
               <div>
                 Provider:{" "}
                 <span className="text-white font-mono">
-                  {booking.payment?.provider || "dev_simulated"}
+                  {booking.payment?.provider || "simulated"}
                 </span>
               </div>
               {booking.payment?.orderId && (

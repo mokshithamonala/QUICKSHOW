@@ -49,9 +49,10 @@ const bookingSchema = new mongoose.Schema(
     lockId: { type: String, required: true },
     lockExpiresAt: { type: Date, required: true },
     payment: {
-      provider: { type: String, default: "dev_simulated" },
-      mode: { type: String, default: "DEVELOPMENT MODE" },
+      provider: { type: String, default: "simulated" },
+      mode: { type: String, default: "DEVELOPMENT MODE (SIMULATED)" },
       isSimulated: { type: Boolean, default: true },
+      isRealTransaction: { type: Boolean, default: false },
       orderId: { type: String, default: "" },
       paymentId: { type: String, default: "", index: true, sparse: true },
       signature: { type: String, default: "" },
