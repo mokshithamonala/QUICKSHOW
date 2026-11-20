@@ -15,10 +15,12 @@ import showRoutes from "./routes/showRoutes.js";
 import bookingRoutes from "./routes/bookingRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
+import classicRoutes from "./routes/classicRoutes.js";
 import { isClerkServerConfigured, requireAuth } from "./middleware/auth.js";
 import { isTmdbConfigured } from "./services/tmdbService.js";
 import { getPaymentStatusInfo } from "./services/payment/paymentService.js";
 import { ensureInitialSeed } from "./services/dataStore.js";
+import { ensureClassicsSeeded } from "./services/classicMovieService.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -34,9 +36,10 @@ const HOST = "0.0.0.0";
 
 const clerkReady = isClerkServerConfigured();
 
-// Connect Database then seed initial theatres & TMDB shows if empty
+// Connect Database then seed initial theatres, TMDB shows, and isolated Watch Free Classics
 connectDB().finally(() => {
   ensureInitialSeed();
+  ensureClassicsSeeded();
 });
 
 // Core Middleware
@@ -81,6 +84,7 @@ app.use("/api/inngest", serve({ client: inngest, functions: syncUserFunctions })
 
 // API Routes
 app.use("/api/movies", movieRoutes);
+app.use("/api/classics", classicRoutes); // Isolated Watch Free Classics collection & rights-verified streams
 app.use("/api", showRoutes); // /api/theaters, /api/shows, /api/shows/:showId
 app.use("/api", bookingRoutes); // /api/bookings/*, /api/payments/*
 app.use("/api/users", userRoutes);

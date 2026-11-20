@@ -97,8 +97,8 @@ const Navbar = () => {
         <div
           className={`absolute left-1/2 -translate-x-1/2
           max-md:top-0 max-md:left-0 max-md:translate-x-0
-          z-50 flex flex-col md:flex-row items-center max-md:justify-center gap-6 md:gap-7
-          md:px-10 py-3 max-md:h-screen md:rounded-full
+          z-50 flex flex-col md:flex-row items-center max-md:justify-center gap-6 md:gap-5 lg:gap-6
+          md:px-8 py-3 max-md:h-screen md:rounded-full
           bg-black/90 md:bg-black/50 md:backdrop-blur-md md:border border-white/20
           transition-all duration-500 ease-in-out
           ${open ? "max-md:w-full opacity-100" : "max-md:w-0 opacity-0 md:opacity-100 overflow-hidden"}`}
@@ -109,7 +109,7 @@ const Navbar = () => {
             onClick={() => setOpen(false)}
           />
 
-          <div className="flex flex-col md:flex-row gap-6 md:gap-7 items-center whitespace-nowrap">
+          <div className="flex flex-col md:flex-row gap-6 md:gap-5 lg:gap-6 items-center whitespace-nowrap">
             <Link
               to="/"
               onClick={() => {
@@ -141,6 +141,17 @@ const Navbar = () => {
               className="text-red-400 hover:text-red-300 text-xs font-bold uppercase tracking-[0.2em]"
             >
               BoB Universe
+            </Link>
+
+            <Link
+              to="/classics"
+              onClick={() => {
+                window.scrollTo(0, 0);
+                setOpen(false);
+              }}
+              className="text-emerald-400 hover:text-emerald-300 text-xs font-bold uppercase tracking-[0.18em]"
+            >
+              Watch Free Classics
             </Link>
 
             <Link
@@ -344,6 +355,16 @@ const Navbar = () => {
                       className="px-3 py-1.5 bg-red-600/20 border border-red-600/40 text-red-300 rounded-full hover:bg-red-600/30"
                     >
                       Mahesh Babu Universe
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSearchOpen(false);
+                        navigate("/classics");
+                      }}
+                      className="px-3 py-1.5 bg-emerald-600/20 border border-emerald-500/40 text-emerald-300 rounded-full hover:bg-emerald-600/30"
+                    >
+                      Watch Free Classics
                     </button>
                     <button
                       type="button"

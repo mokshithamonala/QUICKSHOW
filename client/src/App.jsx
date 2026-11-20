@@ -10,6 +10,7 @@ import MyBookings from "./pages/mybookings";
 import Favourite from "./pages/favourite";
 import Theaters from "./pages/Theaters";
 import Releases from "./pages/Releases";
+import WatchFreeClassics from "./pages/WatchFreeClassics";
 import AdminLayout from "./pages/admin/Layout";
 import Dashboard from "./pages/admin/Dashboard";
 import ManageTheaters from "./pages/admin/ManageTheaters";
@@ -43,6 +44,7 @@ const App = () => {
         <Route path="/mybookings" element={<MyBookings />} />
         <Route path="/theaters" element={<Theaters />} />
         <Route path="/releases" element={<Releases />} />
+        <Route path="/classics" element={<WatchFreeClassics />} />
         <Route path="/favourite" element={<Favourite />} />
         <Route path="/favorite" element={<Navigate to="/favourite" replace />} />
 
