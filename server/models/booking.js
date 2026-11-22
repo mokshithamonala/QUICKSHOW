@@ -49,13 +49,16 @@ const bookingSchema = new mongoose.Schema(
     lockId: { type: String, required: true },
     lockExpiresAt: { type: Date, required: true },
     payment: {
-      provider: { type: String, default: "simulated" },
-      mode: { type: String, default: "DEVELOPMENT MODE (SIMULATED)" },
-      isSimulated: { type: Boolean, default: true },
+      provider: { type: String, default: "razorpay_test" },
+      mode: { type: String, default: "RAZORPAY TEST MODE" },
+      isSimulated: { type: Boolean, default: false },
+      isTestMode: { type: Boolean, default: true },
       isRealTransaction: { type: Boolean, default: false },
-      orderId: { type: String, default: "" },
+      orderId: { type: String, default: "", index: true, sparse: true },
       paymentId: { type: String, default: "", index: true, sparse: true },
       signature: { type: String, default: "" },
+      amountPaise: { type: Number, default: 0 },
+      method: { type: String, default: "" },
       status: {
         type: String,
         enum: ["CREATED", "PAID", "FAILED", "CANCELLED"],
@@ -63,6 +66,7 @@ const bookingSchema = new mongoose.Schema(
       },
       failureReason: { type: String, default: "" },
       verifiedAt: { type: Date, default: null },
+      webhookEvents: { type: [String], default: [] },
     },
   },
   { timestamps: true }
