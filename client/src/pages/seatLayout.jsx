@@ -18,6 +18,30 @@ import { useAuthSession, useAuthUser, AuthSignInButton } from "../lib/auth";
 import Loading from "../components/Loading";
 import DigitalTicketModal from "../components/DigitalTicketModal";
 
+// Singleton loader for official Razorpay Checkout script (loaded only when Razorpay mode is active)
+const loadRazorpayCheckoutScript = () => {
+  if (typeof window === "undefined") return Promise.resolve(false);
+  if (window.Razorpay) return Promise.resolve(true);
+
+  return new Promise((resolve) => {
+    const existing = document.querySelector(
+      'script[src="https://checkout.razorpay.com/v1/checkout.js"]'
+    );
+    if (existing) {
+      existing.addEventListener("load", () => resolve(true));
+      existing.addEventListener("error", () => resolve(false));
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.async = true;
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+};
+
 const SeatLayout = () => {
   const { showId, id, date } = useParams();
   const navigate = useNavigate();
@@ -31,13 +55,22 @@ const SeatLayout = () => {
   const [refreshing, setRefreshing] = useState(false);
 
   // Locking & Payment Modal State
+  const [paymentConfig, setPaymentConfig] = useState(null);
   const [busyAction, setBusyAction] = useState(false);
+  const [verifyingPayment, setVerifyingPayment] = useState(false);
   const [pendingBooking, setPendingBooking] = useState(null);
   const [paymentOrder, setPaymentOrder] = useState(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [failureReason, setFailureReason] = useState("Bank declined (Simulated)");
   const [paymentOutcomeError, setPaymentOutcomeError] = useState("");
   const [confirmedTicket, setConfirmedTicket] = useState(null);
+
+  // Load active backend payment configuration (Razorpay Test Mode or Simulated fallback)
+  useEffect(() => {
+    apiRequest("/api/payments/config")
+      .then((res) => setPaymentConfig(res))
+      .catch(() => {});
+  }, []);
 
   // Load live show + seat map
   const fetchShow = useCallback(
@@ -168,7 +201,131 @@ const SeatLayout = () => {
     [selectedSeatDetails]
   );
 
-  // Step 1: Lock seats atomically on server & create Development Mode payment order
+  // Launch official Razorpay Checkout modal for a locked booking & server-created order
+  const openRazorpayCheckout = useCallback(
+    async (booking, order) => {
+      const loaded = await loadRazorpayCheckoutScript();
+      if (!loaded || !window.Razorpay) {
+        toast.error(
+          "Could not load Razorpay Checkout script. Please check your internet connection and retry."
+        );
+        return;
+      }
+
+      let settled = false;
+
+      const options = {
+        key: order.keyId, // Public Key ID only — secret stays strictly on backend
+        amount: order.amountPaise,
+        currency: order.currency || "INR",
+        name: "QUICKSHOW",
+        description: `${booking.movieSnapshot?.title || "Movie Tickets"} · Seats: ${(
+          booking.bookedSeats || []
+        ).join(", ")}`,
+        order_id: order.orderId,
+        prefill: {
+          name:
+            user?.fullName ||
+            [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
+            booking.userSnapshot?.name ||
+            "",
+          email:
+            user?.primaryEmailAddress?.emailAddress ||
+            booking.userSnapshot?.email ||
+            "",
+        },
+        notes: {
+          bookingId: String(booking._id),
+          bookingCode: booking.bookingCode,
+        },
+        theme: {
+          color: "#F84565",
+        },
+        handler: async (response) => {
+          settled = true;
+          setVerifyingPayment(true);
+          setPaymentOutcomeError("");
+          try {
+            const verifyRes = await apiRequest("/api/payments/verify", {
+              method: "POST",
+              getToken,
+              body: {
+                bookingId: booking._id,
+                orderId: response.razorpay_order_id,
+                paymentId: response.razorpay_payment_id,
+                signature: response.razorpay_signature,
+              },
+            });
+
+            toast.success(
+              verifyRes.message || "Payment verified and digital ticket generated!"
+            );
+            setPendingBooking(null);
+            setPaymentOrder(null);
+            setSelectedSeats([]);
+            setConfirmedTicket(verifyRes.booking);
+            fetchShow(resolvedShowId, true);
+          } catch (err) {
+            const msg =
+              err.message || "Server signature verification failed. Seats released.";
+            setPaymentOutcomeError(msg);
+            toast.error(msg);
+            setPendingBooking(null);
+            setPaymentOrder(null);
+            setSelectedSeats([]);
+            fetchShow(resolvedShowId, true);
+          } finally {
+            setVerifyingPayment(false);
+          }
+        },
+        modal: {
+          ondismiss: () => {
+            if (!settled) {
+              toast(
+                "Razorpay Checkout closed. Your seats remain locked until you retry or cancel."
+              );
+            }
+          },
+        },
+      };
+
+      const rzp = new window.Razorpay(options);
+      rzp.on("payment.failed", async (resp) => {
+        settled = true;
+        const reason =
+          resp?.error?.description ||
+          resp?.error?.reason ||
+          "Payment failed in Razorpay Test Checkout.";
+        const failedPaymentId = resp?.error?.metadata?.payment_id || "";
+
+        try {
+          await apiRequest("/api/payments/failed", {
+            method: "POST",
+            getToken,
+            body: {
+              bookingId: booking._id,
+              paymentId: failedPaymentId,
+              reason,
+            },
+          });
+        } catch {
+          // Best-effort lock release
+        }
+
+        setPaymentOutcomeError(reason);
+        toast.error(reason);
+        setPendingBooking(null);
+        setPaymentOrder(null);
+        setSelectedSeats([]);
+        fetchShow(resolvedShowId, true);
+      });
+
+      rzp.open();
+    },
+    [user, getToken, resolvedShowId, fetchShow]
+  );
+
+  // Step 1: Lock seats atomically on server & create backend payment order (amount always computed server-side)
   const handleProceedToPayment = async () => {
     if (!user) {
       toast.error("Please sign in to lock seats and book tickets.");
@@ -197,17 +354,26 @@ const SeatLayout = () => {
 
       setPendingBooking(booking);
       setPaymentOrder(orderRes.order);
-      toast.success("Seats locked for 7 minutes! Complete simulated checkout below.");
       fetchShow(resolvedShowId, true);
+
+      if (
+        orderRes.order?.provider === "razorpay_test" ||
+        orderRes.order?.provider === "razorpay_live"
+      ) {
+        toast.success("Seats locked for 7 minutes! Opening Razorpay Test Checkout...");
+        await openRazorpayCheckout(booking, orderRes.order);
+      } else {
+        toast.success("Seats locked for 7 minutes! Complete simulated checkout below.");
+      }
     } catch (err) {
-      toast.error(err.message || "Could not lock selected seats.");
+      toast.error(err.message || "Could not start payment checkout.");
       fetchShow(resolvedShowId, true);
     } finally {
       setBusyAction(false);
     }
   };
 
-  // Step 2: Verify simulated payment on backend (Success OR Failure)
+  // Step 2 (Simulated fallback only): Verify simulated payment on backend (Success OR Failure)
   const handleSimulatePayment = async (outcome) => {
     if (!pendingBooking || !paymentOrder || busyAction) return;
     setBusyAction(true);
@@ -233,7 +399,6 @@ const SeatLayout = () => {
       setConfirmedTicket(res.booking);
       fetchShow(resolvedShowId, true);
     } catch (err) {
-      // Expected 402 path when simulating failed payment
       const msg = err.message || "Simulated payment failed.";
       setPaymentOutcomeError(msg);
       toast.error(msg);
@@ -490,7 +655,7 @@ const SeatLayout = () => {
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-bold">Booking Summary</h3>
             <span className="px-2.5 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[11px] font-semibold">
-              DEVELOPMENT MODE CHECKOUT
+              {paymentConfig?.mode || "RAZORPAY TEST MODE"}
             </span>
           </div>
 
@@ -552,15 +717,19 @@ const SeatLayout = () => {
         </div>
       </div>
 
-      {/* DEVELOPMENT MODE Simulated Payment Checkout Modal */}
+      {/* Active Seat Lock & Checkout Modal (Razorpay Test Mode or Simulated Fallback) */}
       {pendingBooking && paymentOrder && (
         <div className="fixed inset-0 z-[95] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
           <div className="w-full max-w-lg bg-zinc-950 border border-amber-500/40 rounded-2xl overflow-hidden shadow-2xl">
-            {/* Explicit DEVELOPMENT MODE Banner */}
+            {/* Explicit Mode Banner */}
             <div className="bg-amber-500/20 border-b border-amber-500/30 px-5 py-3 flex items-center gap-2.5 text-amber-300 text-xs font-bold">
               <AlertTriangle className="w-4 h-4 shrink-0" />
               <span>
-                DEVELOPMENT MODE — SIMULATED PAYMENT ADAPTER (NO REAL CHARGE)
+                {paymentOrder.isSimulated
+                  ? "DEVELOPMENT MODE — SIMULATED PAYMENT ADAPTER (NO REAL CHARGE)"
+                  : paymentOrder.isTestMode
+                  ? "RAZORPAY TEST MODE — TEST CREDENTIALS ONLY (NO REAL MONEY CHARGED)"
+                  : "RAZORPAY SECURE CHECKOUT"}
               </span>
             </div>
 
@@ -568,7 +737,9 @@ const SeatLayout = () => {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <CreditCard className="w-5 h-5 text-red-500" />
-                  <h2 className="text-xl font-bold text-white">Simulated Checkout</h2>
+                  <h2 className="text-xl font-bold text-white">
+                    {paymentOrder.isSimulated ? "Simulated Checkout" : "Razorpay Checkout"}
+                  </h2>
                 </div>
                 <div className="px-3 py-1 rounded-full bg-red-600/20 border border-red-600/40 text-red-300 text-xs font-mono font-bold">
                   Lock expires in {formatTimer(secondsLeft)}
@@ -599,9 +770,9 @@ const SeatLayout = () => {
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-400">Payment Mode</span>
+                  <span className="text-gray-400">Payment Gateway</span>
                   <span className="text-amber-300 font-mono text-xs font-semibold">
-                    PAYMENT_MODE={paymentOrder.provider || "simulated"} (Not Razorpay)
+                    {paymentOrder.mode}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -611,7 +782,7 @@ const SeatLayout = () => {
                   </span>
                 </div>
                 <div className="border-t border-zinc-800 pt-2.5 flex justify-between items-center">
-                  <span className="font-bold text-white">Amount</span>
+                  <span className="font-bold text-white">Server-Verified Amount</span>
                   <span className="text-xl font-black text-red-500">
                     {formatCurrency(pendingBooking.totalAmount)}
                   </span>
@@ -624,65 +795,92 @@ const SeatLayout = () => {
                   Server-Verified Transaction Flow
                 </p>
                 <p>
-                  Choose an outcome below to test real backend verification, booking status
-                  transitions, seat occupation, or automatic lock release. Razorpay can be
-                  connected later without changing this workflow.
+                  {paymentOrder.isSimulated
+                    ? "Choose an outcome below to test backend verification, booking transitions, and automatic lock release."
+                    : "Your order was created via Razorpay's Orders API using backend-calculated ticket prices. Your booking will only confirm after server-side HMAC-SHA256 signature verification."}
                 </p>
               </div>
 
-              {/* Simulated Failure Reason Picker */}
-              <div>
-                <label className="block text-xs text-gray-400 mb-1.5">
-                  Failure Scenario (if testing failed payment):
-                </label>
-                <select
-                  value={failureReason}
-                  onChange={(e) => setFailureReason(e.target.value)}
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-white outline-none"
-                >
-                  <option value="Bank declined transaction (Simulated)">
-                    Bank declined transaction (Simulated)
-                  </option>
-                  <option value="Insufficient funds (Simulated)">
-                    Insufficient funds (Simulated)
-                  </option>
-                  <option value="UPI / Gateway timeout (Simulated)">
-                    UPI / Gateway timeout (Simulated)
-                  </option>
-                </select>
-              </div>
+              {paymentOrder.isSimulated ? (
+                <>
+                  {/* Simulated Failure Reason Picker */}
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1.5">
+                      Failure Scenario (if testing failed payment):
+                    </label>
+                    <select
+                      value={failureReason}
+                      onChange={(e) => setFailureReason(e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-white outline-none"
+                    >
+                      <option value="Bank declined transaction (Simulated)">
+                        Bank declined transaction (Simulated)
+                      </option>
+                      <option value="Insufficient funds (Simulated)">
+                        Insufficient funds (Simulated)
+                      </option>
+                      <option value="UPI / Gateway timeout (Simulated)">
+                        UPI / Gateway timeout (Simulated)
+                      </option>
+                    </select>
+                  </div>
 
-              {/* Action Buttons */}
-              <div className="space-y-2.5 pt-1">
-                <button
-                  type="button"
-                  disabled={busyAction}
-                  onClick={() => handleSimulatePayment("success")}
-                  className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-colors cursor-pointer"
-                >
-                  <CheckCircle2 className="w-5 h-5" />
-                  {busyAction ? "Verifying on Server..." : "Simulate Successful Payment"}
-                </button>
+                  {/* Simulated Action Buttons */}
+                  <div className="space-y-2.5 pt-1">
+                    <button
+                      type="button"
+                      disabled={busyAction}
+                      onClick={() => handleSimulatePayment("success")}
+                      className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                    >
+                      <CheckCircle2 className="w-5 h-5" />
+                      {busyAction ? "Verifying on Server..." : "Simulate Successful Payment"}
+                    </button>
 
-                <button
-                  type="button"
-                  disabled={busyAction}
-                  onClick={() => handleSimulatePayment("failed")}
-                  className="w-full py-3 bg-red-600/20 hover:bg-red-600/35 border border-red-600/40 disabled:opacity-50 text-red-300 font-semibold rounded-xl flex items-center justify-center gap-2 transition-colors cursor-pointer"
-                >
-                  <XCircle className="w-4 h-4" />
-                  Simulate Failed Payment (Releases Seats)
-                </button>
+                    <button
+                      type="button"
+                      disabled={busyAction}
+                      onClick={() => handleSimulatePayment("failed")}
+                      className="w-full py-3 bg-red-600/20 hover:bg-red-600/35 border border-red-600/40 disabled:opacity-50 text-red-300 font-semibold rounded-xl flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                    >
+                      <XCircle className="w-4 h-4" />
+                      Simulate Failed Payment (Releases Seats)
+                    </button>
 
-                <button
-                  type="button"
-                  disabled={busyAction}
-                  onClick={handleCancelCheckout}
-                  className="w-full py-2.5 text-xs text-gray-400 hover:text-white transition-colors cursor-pointer"
-                >
-                  Cancel & Release Seat Lock
-                </button>
-              </div>
+                    <button
+                      type="button"
+                      disabled={busyAction}
+                      onClick={handleCancelCheckout}
+                      className="w-full py-2.5 text-xs text-gray-400 hover:text-white transition-colors cursor-pointer"
+                    >
+                      Cancel & Release Seat Lock
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-2.5 pt-1">
+                  <button
+                    type="button"
+                    disabled={busyAction || verifyingPayment}
+                    onClick={() => openRazorpayCheckout(pendingBooking, paymentOrder)}
+                    className="w-full py-3.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-[0_0_20px_rgba(220,38,38,0.4)]"
+                  >
+                    <CreditCard className="w-5 h-5" />
+                    {verifyingPayment
+                      ? "Verifying Razorpay Signature on Server..."
+                      : `Pay Now with Razorpay (${formatCurrency(pendingBooking.totalAmount)})`}
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={busyAction || verifyingPayment}
+                    onClick={handleCancelCheckout}
+                    className="w-full py-2.5 text-xs text-gray-400 hover:text-white transition-colors cursor-pointer"
+                  >
+                    Cancel & Release Seat Lock
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>

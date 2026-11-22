@@ -122,9 +122,19 @@ router.post("/payments/create-order", requireAuth, async (req, res, next) => {
     }
 
     const adapter = getPaymentAdapter();
+
+    // Backend-only amount enforcement: NEVER trust any frontend-supplied amount
+    const serverAmount = Number(booking.totalAmount);
+    if (!Number.isFinite(serverAmount) || serverAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Booking has an invalid server-calculated amount.",
+      });
+    }
+
     const order = await adapter.createOrder({
       bookingId: String(booking._id),
-      amount: booking.totalAmount,
+      amount: serverAmount,
       currency: booking.currency || "INR",
       bookingCode: booking.bookingCode,
     });
@@ -142,7 +152,7 @@ router.post("/payments/create-order", requireAuth, async (req, res, next) => {
   }
 });
 
-// POST /api/payments/verify — server-side verification BEFORE confirming any booking
+// POST /api/payments/verify — server-side HMAC-SHA256 & amount verification BEFORE confirming any booking
 router.post("/payments/verify", requireAuth, async (req, res, next) => {
   try {
     const {
@@ -189,7 +199,7 @@ router.post("/payments/verify", requireAuth, async (req, res, next) => {
 
     const adapter = getPaymentAdapter();
 
-    // Strict isolation: never allow a simulated booking to be treated as a real Razorpay transaction (or vice versa)
+    // Strict isolation: never allow a booking initiated under one provider to verify under another
     if (
       booking.payment?.provider &&
       booking.payment.provider !== adapter.provider
@@ -203,6 +213,7 @@ router.post("/payments/verify", requireAuth, async (req, res, next) => {
     const verification = await adapter.verifyPayment({
       bookingId: String(booking._id),
       amount: booking.totalAmount,
+      currency: booking.currency || "INR",
       orderId,
       orderToken,
       paymentId,
@@ -215,7 +226,8 @@ router.post("/payments/verify", requireAuth, async (req, res, next) => {
       const failedBooking = await releaseBookingLock(
         String(booking._id),
         "FAILED",
-        verification.reason || "Payment verification failed."
+        verification.reason || "Payment verification failed.",
+        { paymentId: paymentId || "" }
       );
       return res.status(402).json({
         success: false,
@@ -230,6 +242,8 @@ router.post("/payments/verify", requireAuth, async (req, res, next) => {
         paymentId: verification.paymentId,
         signature: verification.signature,
         verifiedAt: verification.verifiedAt,
+        amountPaise: verification.amountPaise,
+        method: verification.method || "",
       });
 
     res.json({
@@ -237,6 +251,8 @@ router.post("/payments/verify", requireAuth, async (req, res, next) => {
       alreadyConfirmed,
       message: adapter.isSimulated
         ? "DEVELOPMENT MODE: Simulated payment verified and digital ticket generated!"
+        : adapter.isTestMode
+        ? "RAZORPAY TEST MODE: Payment signature verified and digital ticket generated!"
         : "Payment verified and booking confirmed!",
       booking: confirmedBooking,
     });
@@ -245,19 +261,55 @@ router.post("/payments/verify", requireAuth, async (req, res, next) => {
   }
 });
 
-// POST /api/payments/webhook — modular webhook endpoint ready for Razorpay signature verification
-router.post("/payments/webhook", express.raw({ type: "application/json" }), (req, res) => {
-  const adapter = getPaymentAdapter();
-  const signatureHeader = req.headers["x-razorpay-signature"] || "";
-  const rawBody = Buffer.isBuffer(req.body)
-    ? req.body.toString("utf8")
-    : JSON.stringify(req.body || {});
-  const result = adapter.verifyWebhook(rawBody, signatureHeader);
+// POST /api/payments/failed — records Razorpay Checkout failure and releases locked seats cleanly
+router.post("/payments/failed", requireAuth, async (req, res, next) => {
+  try {
+    const { bookingId, paymentId = "", reason = "Payment failed in Razorpay Checkout." } =
+      req.body || {};
 
-  if (!result.verified) {
-    return res.status(400).json({ success: false, message: result.reason || "Invalid webhook" });
+    if (!bookingId) {
+      return res.status(400).json({ success: false, message: "bookingId is required" });
+    }
+
+    const booking = await getBookingById(bookingId);
+    if (!booking) {
+      return res.status(404).json({ success: false, message: "Booking not found" });
+    }
+    if (booking.userId !== req.authUser.userId) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
+
+    if (booking.status === "CONFIRMED" && booking.isPaid) {
+      return res.json({
+        success: true,
+        message: "Booking is already confirmed.",
+        booking,
+      });
+    }
+
+    const failedBooking = await releaseBookingLock(
+      String(booking._id),
+      "FAILED",
+      String(reason).slice(0, 300),
+      { paymentId: String(paymentId || "") }
+    );
+
+    res.json({
+      success: true,
+      message: "Payment failure recorded and locked seats released.",
+      booking: failedBooking,
+    });
+  } catch (err) {
+    next(err);
   }
-  return res.json({ success: true, ...result });
+});
+
+// Legacy webhook path notice (official webhook lives at POST /api/razorpay/webhook with raw body parsing)
+router.post("/payments/webhook", (_req, res) => {
+  return res.status(410).json({
+    success: false,
+    message: "Use POST /api/razorpay/webhook for Razorpay webhook delivery.",
+  });
 });
 
 // GET /api/bookings/my — authenticated user's persistent booking history

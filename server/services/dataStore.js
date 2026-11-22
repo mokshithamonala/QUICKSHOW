@@ -4,6 +4,7 @@ import User from "../models/user.js";
 import Theatre from "../models/theatre.js";
 import Show from "../models/show.js";
 import Booking from "../models/booking.js";
+import WebhookEvent from "../models/webhookEvent.js";
 import { getMaheshBabuUniverse, getMoviesByCategory, isTmdbConfigured } from "./tmdbService.js";
 
 export const SEAT_LOCK_DURATION_MS = 7 * 60 * 1000; // 7 minutes
@@ -17,6 +18,7 @@ const memStore = {
   theatres: new Map(),
   shows: new Map(),
   bookings: new Map(),
+  webhookEvents: new Map(),
   seeded: false,
 };
 
@@ -166,7 +168,12 @@ export const ensureInitialSeed = async () => {
           getMoviesByCategory("now_playing", 1),
         ]);
         if (mbRes.status === "fulfilled" && mbRes.value?.movies?.length) {
-          seedMovies.push(...mbRes.value.movies.filter((m) => m.poster_path).slice(0, 4));
+          const withPosters = mbRes.value.movies.filter((m) => m.poster_path);
+          const athadu = withPosters.find((m) => Number(m.id) === 37172);
+          const curatedSeed = withPosters
+            .slice(0, 4)
+            .map((m) => (Number(m.id) === 679919 && athadu ? athadu : m));
+          seedMovies.push(...curatedSeed);
         }
         if (npRes.status === "fulfilled" && npRes.value?.results?.length) {
           seedMovies.push(...npRes.value.results.filter((m) => m.poster_path).slice(0, 4));
@@ -689,11 +696,14 @@ export const lockSeatsAndCreateBooking = async ({
       lockId,
       lockExpiresAt,
       payment: {
-        provider: "simulated",
-        mode: "DEVELOPMENT MODE (SIMULATED)",
-        isSimulated: true,
+        provider: "razorpay_test",
+        mode: "RAZORPAY TEST MODE",
+        isSimulated: false,
+        isTestMode: true,
         isRealTransaction: false,
+        amountPaise: Math.round(totalAmount * 100),
         status: "CREATED",
+        webhookEvents: [],
       },
     });
 
@@ -777,16 +787,20 @@ export const lockSeatsAndCreateBooking = async ({
     lockId,
     lockExpiresAt,
     payment: {
-      provider: "simulated",
-      mode: "DEVELOPMENT MODE (SIMULATED)",
-      isSimulated: true,
+      provider: "razorpay_test",
+      mode: "RAZORPAY TEST MODE",
+      isSimulated: false,
+      isTestMode: true,
       isRealTransaction: false,
       orderId: "",
       paymentId: "",
       signature: "",
+      amountPaise: Math.round(totalAmount * 100),
+      method: "",
       status: "CREATED",
       failureReason: "",
       verifiedAt: null,
+      webhookEvents: [],
     },
     createdAt: now,
     updatedAt: now,
@@ -803,14 +817,32 @@ export const getBookingById = async (bookingId) => {
   return memStore.bookings.get(String(bookingId)) || null;
 };
 
+export const findBookingByOrderId = async (orderId) => {
+  if (!orderId) return null;
+  if (isDbConnected()) {
+    return Booking.findOne({ "payment.orderId": String(orderId) }).lean();
+  }
+  for (const b of memStore.bookings.values()) {
+    if (b.payment?.orderId === String(orderId)) return b;
+  }
+  return null;
+};
+
 export const updateBookingOrder = async (bookingId, paymentOrder) => {
   const isSimulated = Boolean(paymentOrder.isSimulated);
+  const isTestMode = Boolean(paymentOrder.isTestMode);
+  const isRealTransaction = Boolean(paymentOrder.isRealTransaction);
+  const amountPaise =
+    Number(paymentOrder.amountPaise) || Math.round(Number(paymentOrder.amount || 0) * 100);
+
   const update = {
     "payment.provider": paymentOrder.provider,
     "payment.mode": paymentOrder.mode,
     "payment.isSimulated": isSimulated,
-    "payment.isRealTransaction": !isSimulated,
+    "payment.isTestMode": isTestMode,
+    "payment.isRealTransaction": isRealTransaction,
     "payment.orderId": paymentOrder.orderId,
+    "payment.amountPaise": amountPaise,
     "payment.status": "CREATED",
   };
 
@@ -824,17 +856,29 @@ export const updateBookingOrder = async (bookingId, paymentOrder) => {
     provider: paymentOrder.provider,
     mode: paymentOrder.mode,
     isSimulated,
-    isRealTransaction: !isSimulated,
+    isTestMode,
+    isRealTransaction,
     orderId: paymentOrder.orderId,
+    amountPaise,
     status: "CREATED",
   };
   b.updatedAt = new Date();
   return b;
 };
 
-export const releaseBookingLock = async (bookingId, newStatus = "CANCELLED", failureReason = "") => {
+export const releaseBookingLock = async (
+  bookingId,
+  newStatus = "CANCELLED",
+  failureReason = "",
+  { paymentId = "", webhookEventId = "" } = {}
+) => {
   const booking = await getBookingById(bookingId);
   if (!booking) return null;
+
+  // Never downgrade an already CONFIRMED & PAID booking
+  if (booking.status === "CONFIRMED" && booking.isPaid) {
+    return booking;
+  }
 
   if (booking.status !== "PENDING_PAYMENT") {
     return booking;
@@ -850,17 +894,21 @@ export const releaseBookingLock = async (bookingId, newStatus = "CANCELLED", fai
       { $unset: unsetLocks }
     );
 
-    const updated = await Booking.findByIdAndUpdate(
-      bookingId,
-      {
-        $set: {
-          status: newStatus,
-          "payment.status": newStatus === "FAILED" ? "FAILED" : "CANCELLED",
-          "payment.failureReason": failureReason || "",
-        },
-      },
-      { new: true }
-    ).lean();
+    const setFields = {
+      status: newStatus,
+      "payment.status": newStatus === "FAILED" ? "FAILED" : "CANCELLED",
+      "payment.failureReason": failureReason || "",
+    };
+    if (paymentId) setFields["payment.paymentId"] = paymentId;
+
+    const updateOps = { $set: setFields };
+    if (webhookEventId) {
+      updateOps.$addToSet = { "payment.webhookEvents": webhookEventId };
+    }
+
+    const updated = await Booking.findByIdAndUpdate(bookingId, updateOps, {
+      new: true,
+    }).lean();
     return updated;
   }
 
@@ -877,6 +925,12 @@ export const releaseBookingLock = async (bookingId, newStatus = "CANCELLED", fai
   memBooking.status = newStatus;
   memBooking.payment.status = newStatus === "FAILED" ? "FAILED" : "CANCELLED";
   memBooking.payment.failureReason = failureReason || "";
+  if (paymentId) memBooking.payment.paymentId = paymentId;
+  if (webhookEventId) {
+    memBooking.payment.webhookEvents = Array.from(
+      new Set([...(memBooking.payment.webhookEvents || []), webhookEventId])
+    );
+  }
   memBooking.updatedAt = new Date();
   return memBooking;
 };
@@ -884,8 +938,12 @@ export const releaseBookingLock = async (bookingId, newStatus = "CANCELLED", fai
 export const confirmBookingAfterVerifiedPayment = async ({
   bookingId,
   paymentId,
-  signature,
+  signature = "",
   verifiedAt,
+  amountPaise,
+  method = "",
+  webhookEventId = "",
+  allowWebhookGrace = false,
 }) => {
   const booking = await getBookingById(bookingId);
   if (!booking) {
@@ -894,23 +952,47 @@ export const confirmBookingAfterVerifiedPayment = async ({
 
   // Duplicate payment / idempotency protection
   if (booking.status === "CONFIRMED" && booking.isPaid) {
+    if (webhookEventId) {
+      if (isDbConnected()) {
+        await Booking.findByIdAndUpdate(bookingId, {
+          $addToSet: { "payment.webhookEvents": webhookEventId },
+        });
+      } else {
+        const mb = memStore.bookings.get(String(bookingId));
+        if (mb) {
+          mb.payment.webhookEvents = Array.from(
+            new Set([...(mb.payment.webhookEvents || []), webhookEventId])
+          );
+        }
+      }
+    }
     return { booking, alreadyConfirmed: true };
   }
 
-  if (booking.status !== "PENDING_PAYMENT") {
+  const canRecoverViaWebhook =
+    allowWebhookGrace && (booking.status === "EXPIRED" || booking.status === "PENDING_PAYMENT");
+
+  if (booking.status !== "PENDING_PAYMENT" && !canRecoverViaWebhook) {
     throw Object.assign(
       new Error(`Booking cannot be confirmed from status ${booking.status}.`),
       { status: 409 }
     );
   }
 
-  if (new Date(booking.lockExpiresAt).getTime() < Date.now()) {
-    await releaseBookingLock(bookingId, "EXPIRED", "Seat reservation lock expired before payment completed.");
+  if (!allowWebhookGrace && new Date(booking.lockExpiresAt).getTime() < Date.now()) {
+    await releaseBookingLock(
+      bookingId,
+      "EXPIRED",
+      "Seat reservation lock expired before payment completed."
+    );
     throw Object.assign(
       new Error("Your seat lock expired before payment was verified. Please select seats again."),
       { status: 410 }
     );
   }
+
+  const resolvedAmountPaise =
+    Number(amountPaise) || booking.payment?.amountPaise || Math.round(Number(booking.totalAmount) * 100);
 
   if (isDbConnected()) {
     // Check duplicate paymentId across all bookings
@@ -952,21 +1034,26 @@ export const confirmBookingAfterVerifiedPayment = async ({
       );
     }
 
-    const confirmedBooking = await Booking.findByIdAndUpdate(
-      bookingId,
-      {
-        $set: {
-          status: "CONFIRMED",
-          isPaid: true,
-          "payment.paymentId": paymentId,
-          "payment.signature": signature || "",
-          "payment.status": "PAID",
-          "payment.verifiedAt": verifiedAt || new Date(),
-          "payment.failureReason": "",
-        },
-      },
-      { new: true }
-    ).lean();
+    const setFields = {
+      status: "CONFIRMED",
+      isPaid: true,
+      "payment.paymentId": paymentId,
+      "payment.signature": signature || booking.payment?.signature || "",
+      "payment.amountPaise": resolvedAmountPaise,
+      "payment.method": method || booking.payment?.method || "",
+      "payment.status": "PAID",
+      "payment.verifiedAt": verifiedAt || new Date(),
+      "payment.failureReason": "",
+    };
+
+    const updateOps = { $set: setFields };
+    if (webhookEventId) {
+      updateOps.$addToSet = { "payment.webhookEvents": webhookEventId };
+    }
+
+    const confirmedBooking = await Booking.findByIdAndUpdate(bookingId, updateOps, {
+      new: true,
+    }).lean();
 
     return { booking: confirmedBooking, alreadyConfirmed: false };
   }
@@ -997,13 +1084,92 @@ export const confirmBookingAfterVerifiedPayment = async ({
   memBooking.payment = {
     ...memBooking.payment,
     paymentId,
-    signature: signature || "",
+    signature: signature || memBooking.payment?.signature || "",
+    amountPaise: resolvedAmountPaise,
+    method: method || memBooking.payment?.method || "",
     status: "PAID",
     verifiedAt: verifiedAt || new Date(),
     failureReason: "",
+    webhookEvents: webhookEventId
+      ? Array.from(new Set([...(memBooking.payment?.webhookEvents || []), webhookEventId]))
+      : memBooking.payment?.webhookEvents || [],
   };
   memBooking.updatedAt = new Date();
   return { booking: memBooking, alreadyConfirmed: false };
+};
+
+// ==========================================
+// Webhook Idempotency Helpers (MongoDB + Fallback)
+// ==========================================
+export const claimWebhookEvent = async ({
+  eventId,
+  provider = "razorpay_test",
+  eventType,
+  orderId = "",
+  paymentId = "",
+}) => {
+  const key = String(eventId || "").trim();
+  if (!key) {
+    throw Object.assign(new Error("Missing webhook eventId for idempotency check."), {
+      status: 400,
+    });
+  }
+
+  if (isDbConnected()) {
+    try {
+      await WebhookEvent.create({
+        eventId: key,
+        provider,
+        eventType,
+        orderId,
+        paymentId,
+        status: "PROCESSING",
+        processedAt: new Date(),
+      });
+      return { duplicate: false };
+    } catch (err) {
+      if (err?.code === 11000) {
+        return { duplicate: true };
+      }
+      throw err;
+    }
+  }
+
+  if (memStore.webhookEvents.has(key)) {
+    return { duplicate: true };
+  }
+
+  memStore.webhookEvents.set(key, {
+    eventId: key,
+    provider,
+    eventType,
+    orderId,
+    paymentId,
+    status: "PROCESSING",
+    processedAt: new Date(),
+  });
+  return { duplicate: false };
+};
+
+export const finalizeWebhookEvent = async (eventId, { status = "PROCESSED", bookingId = "", note = "" } = {}) => {
+  const key = String(eventId || "").trim();
+  if (!key) return;
+
+  if (isDbConnected()) {
+    await WebhookEvent.findOneAndUpdate(
+      { eventId: key },
+      { $set: { status, bookingId: String(bookingId || ""), note, processedAt: new Date() } }
+    );
+    return;
+  }
+
+  const existing = memStore.webhookEvents.get(key);
+  if (existing) {
+    existing.status = status;
+    existing.bookingId = String(bookingId || "");
+    existing.note = note;
+    existing.processedAt = new Date();
+  }
 };
 
 export const listBookingsForUser = async (userId) => {

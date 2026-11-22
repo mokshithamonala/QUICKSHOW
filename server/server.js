@@ -16,6 +16,7 @@ import bookingRoutes from "./routes/bookingRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
 import classicRoutes from "./routes/classicRoutes.js";
+import razorpayWebhookRoutes from "./routes/razorpayWebhookRoutes.js";
 import { isClerkServerConfigured, requireAuth } from "./middleware/auth.js";
 import { isTmdbConfigured } from "./services/tmdbService.js";
 import { getPaymentStatusInfo } from "./services/payment/paymentService.js";
@@ -44,6 +45,11 @@ connectDB().finally(() => {
 
 // Core Middleware
 app.use(cors());
+
+// Razorpay Webhook MUST be mounted BEFORE express.json() and clerkMiddleware()
+// so HMAC-SHA256 verification uses the exact untouched raw request body.
+app.use("/api/razorpay", razorpayWebhookRoutes);
+
 app.use(express.json({ limit: "2mb" }));
 
 // Health & Status Endpoint (always returns 200 JSON, never triggers auth handshake)
@@ -61,7 +67,11 @@ app.get("/api/health", (_req, res) => {
     paymentProvider: payment.provider,
     paymentLabel: payment.mode,
     isSimulatedPayment: payment.isSimulated,
+    isTestMode: payment.isTestMode,
     razorpayConfigured: payment.razorpayConfigured,
+    razorpayTestModeReady: payment.razorpayTestModeReady,
+    webhookSecretConfigured: payment.webhookSecretConfigured,
+    webhookEndpoint: payment.webhookEndpoint,
   });
 });
 

@@ -35,7 +35,28 @@ const Home = () => {
           setTrending(trRes.value.results || []);
         }
         if (mbRes.status === "fulfilled") {
-          setMaheshMovies((mbRes.value.movies || []).filter((m) => m.poster_path));
+          const withPosters = (mbRes.value.movies || []).filter((m) => m.poster_path);
+          // Replace ONLY the 4th card (Acharya, ID 679919) with Athadu (2005, ID 37172)
+          // while preserving Vāranāsi, Guntur Kaaram, Sarkaru Vaari Paata, and Sarileru Neekevvaru unchanged
+          const athaduReplacement = withPosters.find((m) => Number(m.id) === 37172) || {
+            id: 37172,
+            _id: "37172",
+            title: "Athadu",
+            original_title: "అతడు",
+            release_date: "2005-08-10",
+            original_language: "te",
+            vote_average: 7.8,
+            genres: [
+              { id: 28, name: "Action" },
+              { id: 53, name: "Thriller" },
+              { id: 10751, name: "Family" },
+            ],
+            poster_path: "https://image.tmdb.org/t/p/w500/ojZAu2KOemaDEfLnJXZeuU9QQko.jpg",
+          };
+          const curatedBoBHomeRow = withPosters
+            .slice(0, 5)
+            .map((m) => (Number(m.id) === 679919 ? athaduReplacement : m));
+          setMaheshMovies(curatedBoBHomeRow);
         }
         if (trailerRes.status === "fulfilled") {
           setTrailers(trailerRes.value.trailers || []);

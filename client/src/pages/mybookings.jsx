@@ -108,12 +108,16 @@ const MyBookings = () => {
                         <span className="text-xs font-mono text-gray-400">
                           {item.bookingCode}
                         </span>
-                        {item.payment?.isSimulated && (
+                        {item.payment?.isSimulated ? (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 text-[10px] font-semibold">
                             <AlertTriangle className="w-3 h-3" />
                             DEV MODE
                           </span>
-                        )}
+                        ) : item.payment?.provider === "razorpay_test" || item.payment?.isTestMode ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-sky-500/15 text-sky-300 text-[10px] font-semibold">
+                            RAZORPAY TEST
+                          </span>
+                        ) : null}
                       </div>
 
                       <p className="text-xl font-bold text-white">

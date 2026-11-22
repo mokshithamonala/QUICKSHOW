@@ -84,15 +84,22 @@ const DigitalTicketModal = ({ booking, onClose }) => {
         className="relative w-full max-w-2xl bg-zinc-950 border border-red-600/30 rounded-2xl overflow-hidden shadow-2xl my-8"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Top Development Mode Banner when simulated */}
-        {booking.payment?.isSimulated && (
+        {/* Top Mode Banner for Simulated or Razorpay Test Mode transactions */}
+        {booking.payment?.isSimulated ? (
           <div className="bg-amber-500/15 border-b border-amber-500/30 px-5 py-2.5 flex items-center gap-2 text-amber-300 text-xs font-medium">
             <AlertTriangle className="w-4 h-4 shrink-0" />
             <span>
               DEVELOPMENT MODE — Simulated Payment Transaction (No real money charged)
             </span>
           </div>
-        )}
+        ) : booking.payment?.provider === "razorpay_test" || booking.payment?.isTestMode ? (
+          <div className="bg-sky-500/15 border-b border-sky-500/30 px-5 py-2.5 flex items-center gap-2 text-sky-300 text-xs font-medium">
+            <ShieldCheck className="w-4 h-4 shrink-0" />
+            <span>
+              RAZORPAY TEST MODE — HMAC-SHA256 Verified Test Transaction (No real money charged)
+            </span>
+          </div>
+        ) : null}
 
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
